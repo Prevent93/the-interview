@@ -1,5 +1,8 @@
 <?php
-
+/**
+ * Commit timestamp - Just cloned repo and set up a clean laravel install - Charlie Sheather - Thu, 04 Dec 2014 11:31:58
+ *
+ */
 class doCSV {
     /**
      * This is the job that will be launched by the Laravel queue...
