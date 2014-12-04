@@ -137,7 +137,7 @@ class doCSV {
 			// this could be done better but this code is for this specific csv
 			$value_template     = ' (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),';
 
-			$stop_at            = 100000; // set to 0 to process entire file, or to X to process X number of rows (approximately)
+			$stop_at            = 0; // set to 0 to process entire file, or to X to process X number of rows (approximately)
 
 			// trying another approach here, "sub-chunking" the pdo parameters
 			$commit_chunk_size  = 2500; // anywhere between 1000 > 10000 is fine, more or less would probably be ok too. I like 2500
