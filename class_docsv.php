@@ -77,12 +77,13 @@ class doCSV {
 			//  as a start lets just get this thing going
 			$time_start = microtime(true);
 
-			// much faster juut to use php native pdo, which for this type of task is mroe than adequate.
+			// much faster to use phps native pdo instead of laravel DB, so we'll grab the underlying pdo here, which for this type of task is mroe than adequate.
 			$pdo = DB::getPdo();
 			$pdo->beginTransaction();
 			$sql_base = 'INSERT INTO ' . $this->table . ' (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES';
 			$value_template = ' (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),';
 
+			// trying another approach here, "sub-chunking" the pdo parameters
 			$commit_chunk_size  = 2500; // anywhere between 1000 > 10000 is fine, more or less would probably be ok too. I like 2500
 			$query_chunk_size   = 10; // 10 seems to be the magic number here
 			$all_val            = rtrim(str_repeat($value_template, $query_chunk_size), ',');
