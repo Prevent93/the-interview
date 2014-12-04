@@ -16,6 +16,7 @@ class doCSV {
 	private $sql = array();
 	private $sql_len = 0;
 	private $total_rows = 0;
+	private $table = 'csv_data';
 	public function runJob($job, $data)
 	{
 		$downloadUrl = $data['url'];
@@ -23,13 +24,10 @@ class doCSV {
 
 		try
 		{
-			$time_start = microtime(true);
 			$file = $this->downloadCSV($downloadUrl);
 				//http://stackoverflow.com/questions/3908477/need-time-efficient-method-of-importing-large-csv-file-via-php-into-multiple-mys?rq=1
 			// https://laracasts.com/forum/?p=649-bulk-insert-update/0
 			$success = $this->insertCSVIntoDatabase($clientID, $file);
-			$time_end = microtime(true);
-			echo 'Total Execution Time: ' . substr(($time_end - $time_start), 0, 8) . ' seconds';
 		}
 		catch (Exception $e)
 		{
@@ -73,8 +71,8 @@ class doCSV {
 		$fp = fopen('batch_of_urls.csv', 'r');
 		if ($fp !== false)
 		{
-			echo "\nStarting...\n\nTruncating table...\n\n";
-			DB::table('csv_data')->truncate();
+			echo "\nStarting...\n\nTruncating table " . $this->table . "...\n\n";
+			DB::table($this->table)->truncate();
 			echo "Truncated.\n\n";
 			//  as a start lets just get this thing going
 			$time_start = microtime(true);
@@ -82,35 +80,51 @@ class doCSV {
 			// much faster juut to use php native pdo, which for this type of task is mroe than adequate.
 			$pdo = DB::getPdo();
 			$pdo->beginTransaction();
-			$sql_base = 'INSERT INTO csv_data (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)';
-			$query = $pdo->prepare($sql_base);
-			$sql = $sql_base;
-			$chunk_size = 5000;
+			$sql_base = 'INSERT INTO ' . $this->table . ' (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES';
+			$value_template = ' (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),';
+
+			$commit_chunk_size  = 2500; // anywhere between 1000 > 10000 is fine, more or less would probably be ok too. I like 2500
+			$query_chunk_size   = 10; // 10 seems to be the magic number here
+			$all_val            = rtrim(str_repeat($value_template, $query_chunk_size), ',');
+			$query              = $pdo->prepare($sql_base . $all_val);
+			$current_query_size = 0;
+			$insert_rows        = array();
+
 			$last_time = $time_start;
 
+			// fgetcsv is RCF compatible, ie, it knows that things in quotes are not special: "hello, world" == array("hello, world") != array("hello", "world") 
 			while (($data = fgetcsv($fp, 1000, ",")) !== FALSE)
 			{
-				if ($this->sql_len++ == $chunk_size)
+				if ($this->sql_len++ == $commit_chunk_size)
 				{
 					$pdo->commit();
 					$this->sql_len = 0;
-					$this->total_rows += $chunk_size;
+					$this->total_rows += $commit_chunk_size;
 
 					$time_end = microtime(true);
-					echo "Inserted: " . $chunk_size . "   Total: ~" . $this->total_rows . "   Time delta: " . substr(($time_end - $last_time), 0, 8) . "   Current insert time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
+					echo "Committed: " . $commit_chunk_size . "   Total: " . $this->total_rows . "   Chunk time: " . substr(($time_end - $last_time), 0, 8) . "   Total time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
 					$last_time = $time_end;
 					$pdo->beginTransaction();
 				}
 
-				if ($this->total_rows > 50000) break;
+				if ($current_query_size++ == $query_chunk_size)
+				{
+					$query->execute($insert_rows);
+					$current_query_size = 1; // THIS NEEDS TO BE 1!!!, otherwise we get an extra sub chunk of data and the query fails
+					$insert_rows = array();
+				}
 
 				array_unshift($data, $clientID);
-				$query->execute($data);
+				$insert_rows = array_merge($insert_rows, $data);
+
+				if ($this->total_rows >= 50000) break;
 
 			}
 
 			$time_end = microtime(true);
+			$total_time = substr(($time_end - $time_start), 0, 8);
 			echo "\nTotal insert time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
+			echo "\n~Time per 1000 rows: " . substr(($total_time / $this->total_rows * 10000), 0, 8). " seconds\n";
 		}
 		fclose($fp);
 // die;
