@@ -16,7 +16,7 @@ ini_set('memory_limit','512M');
  * TEST RESULTS - Charlie Sheather - Thu, 04 Dec 2014 16:59:35
  *   Used about 10mb ram during testing
  *   Avg time per 1000 rows: 1.066233 seconds (without indexes ON target_url and source_url)
- *   Avg time per 1000 rows: 1.512354 seconds (with indexes ON target_url and source_url)
+ *   Avg time per 1000 rows: 1.512354 seconds (with indexes ON target_url and source_url) 
  */
 
 /*
