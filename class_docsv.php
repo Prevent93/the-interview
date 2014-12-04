@@ -1,4 +1,5 @@
 <?php
+// set the mem limit to what is stated below in the comment for insertCSVIntoDatabase()
 ini_set('memory_limit','512M');
 /**
  * NOTES
@@ -7,11 +8,48 @@ ini_set('memory_limit','512M');
  *
  *   This is meant for CLI use, has NOT been tested in any other environment
  *
+ * NOTES ON TABLE STRUCTURE 
+ *   - Have chosen to use MyISAM as it dramatically speeds up the the insertions
+ *   - target_url, source_url, anchor_text could be change to varchar(~500) but it would need more
+ *     research to find if it that is suitable for other data going into this table
+ *
  * TEST RESULTS - Charlie Sheather - Thu, 04 Dec 2014 16:59:35
  *   Used about 10mb ram during testing
  *   Avg time per 1000 rows: 1.066233 seconds (without indexes ON target_url and source_url)
  *   Avg time per 1000 rows: 1.512354 seconds (with indexes ON target_url and source_url)
  */
+
+/*
+-- SQL TABLE DUMP
+CREATE TABLE IF NOT EXISTS `csv_data` (
+  `client_id` int(11) NOT NULL,
+  `url_id` int(11) NOT NULL AUTO_INCREMENT,
+  `target_url` text NOT NULL,
+  `source_url` text NOT NULL,
+  `anchor_text` text NOT NULL,
+  `source_crawl_date` date NOT NULL,
+  `source_first_found_date` date NOT NULL,
+  `flag_no_follow` tinyint(1) NOT NULL,
+  `flag_image_link` tinyint(1) NOT NULL,
+  `flag_redirect` tinyint(1) NOT NULL,
+  `flag_frame` tinyint(1) NOT NULL,
+  `flag_old_crawl` tinyint(1) NOT NULL,
+  `flag_alt_text` tinyint(1) NOT NULL,
+  `flag_mention` tinyint(1) NOT NULL,
+  `source_citation_flow` tinyint(2) NOT NULL,
+  `source_trust_flow` tinyint(2) NOT NULL,
+  `target_citation_flow` tinyint(2) NOT NULL,
+  `target_trust_flow` tinyint(2) NOT NULL,
+  `source_topical_trust_flow_topic_0` varchar(64) NOT NULL,
+  `source_topical_trust_flow_value_0` tinyint(2) NOT NULL,
+  `ref_domain_topical_trust_flow_topic_0` varchar(64) NOT NULL,
+  `ref_domain_topical_trust_flow_value_0` tinyint(2) NOT NULL,
+  PRIMARY KEY (`url_id`),
+  KEY `client_id` (`client_id`),
+  FULLTEXT KEY `target_url` (`target_url`),
+  FULLTEXT KEY `source_url` (`source_url`)
+) ENGINE=MyISAM DEFAULT CHARSET=latin1 AUTO_INCREMENT=1 ;
+*/
 
 class doCSV {
 	/**
@@ -72,6 +110,8 @@ class doCSV {
 	private function insertCSVIntoDatabase($clientID, $file)
 	{
 		$file = $this->decompressGz($file);
+
+		// open up the csv
 		$fp = fopen($file, 'r');
 
 		if ($fp !== false)
@@ -184,7 +224,7 @@ class doCSV {
 
 			fclose($fp);
 
-
+			//  some more error checking could be implemented, but I'm out of time :)
 		}
 		else
 		{
