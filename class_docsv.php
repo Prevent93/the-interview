@@ -9,9 +9,8 @@ ini_set('memory_limit','512M');
  *
  * TEST RESULTS - Charlie Sheather - Thu, 04 Dec 2014 16:59:35
  *   Used about 10mb ram during testing
- *   Total insert time: 142.6087 seconds
- *   Avg time per 1000 rows: 1.066233 seconds
- * 
+ *   Avg time per 1000 rows: 1.066233 seconds (without indexes ON target_url and source_url)
+ *   Avg time per 1000 rows: 1.512354 seconds (with indexes ON target_url and source_url)
  */
 
 class doCSV {
@@ -88,9 +87,14 @@ class doCSV {
 
 			// much faster to use phps native pdo instead of laravel DB, so we'll grab the underlying pdo here, which for this type of task is mroe than adequate.
 			$pdo = DB::getPdo();
-			$pdo->beginTransaction();
-			$sql_base = 'INSERT INTO ' . $this->table . ' (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES';
-			$value_template = ' (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),';
+
+			// base sql query
+			$sql_base           = 'INSERT INTO ' . $this->table . ' (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES';
+			
+			// this could be done better but this code is for this specific csv
+			$value_template     = ' (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),';
+
+			$stop_at            = 100000; // set to 0 to process entire file, or to X to process X number of rows (approximately)
 
 			// trying another approach here, "sub-chunking" the pdo parameters
 			$commit_chunk_size  = 2500; // anywhere between 1000 > 10000 is fine, more or less would probably be ok too. I like 2500
@@ -105,9 +109,22 @@ class doCSV {
 			// we want to time each chunk insert
 			$last_time = $time_start;
 
+			// start the first transaction
+			$pdo->beginTransaction();
+
+			// this csv has a header row, we want to remove it
+			$removed_header = false;
+
 			// fgetcsv is RCF compatible, ie, it knows that things in quotes are not special: "hello, world" == array("hello, world") != array("hello", "world") 
 			while (($data = fgetcsv($fp, 1000, ",")) !== FALSE)
 			{
+				// check fi the header has been removed, if it hasn't, just continue
+				if (!$removed_header)
+				{
+					$removed_header = true;
+					continue;	
+				}
+
 				// were going to commit every $commit_chunk_size records
 				if ($chunk_row_count++ == $commit_chunk_size)
 				{
@@ -143,6 +160,11 @@ class doCSV {
 					$insert_rows = array(); // reset the rows to insert
 				}
 
+				// set the flags to suit the table
+				for ($i = 5; $i <= 11; $i++)
+				{ 
+					$data[$i] = ($data[$i] == '+' ? 1 : 0);
+				}
 				// add the client id to the start of the array we got from the csv
 				array_unshift($data, $clientID);
 
@@ -150,7 +172,7 @@ class doCSV {
 				$insert_rows = array_merge($insert_rows, $data);
 
 				$total_rows++;
-				if ($total_rows >= 50000) break;
+				if ($stop_at > 0 && $total_rows >= $stop_at) break;
 
 			}
 
@@ -161,12 +183,13 @@ class doCSV {
 			echo "\nAvg time per 1000 rows: " . substr(($total_time / $total_rows * 10000), 0, 8). " seconds\n";
 
 			fclose($fp);
+
+
 		}
 		else
 		{
 			throw new Exception("Could not open CSV file.");
 		}
-		// throw new Exception("There was an error importing the CSV file into the database.");
 	}
 
 
