@@ -29,7 +29,7 @@ class doCSV {
 			// https://laracasts.com/forum/?p=649-bulk-insert-update/0
 			$success = $this->insertCSVIntoDatabase($clientID, $file);
 			$time_end = microtime(true);
-			echo 'Total Execution Time: ' . ($time_end - $time_start) . ' seconds';
+			echo 'Total Execution Time: ' . substr(($time_end - $time_start), 0, 8) . ' seconds';
 		}
 		catch (Exception $e)
 		{
@@ -73,7 +73,9 @@ class doCSV {
 		$fp = fopen('batch_of_urls.csv', 'r');
 		if ($fp !== false)
 		{
+			echo "\nStarting...\n\nTruncating table...\n\n";
 			DB::table('csv_data')->truncate();
+			echo "Truncated.\n\n";
 			//  as a start lets just get this thing going
 			$time_start = microtime(true);
 
@@ -84,6 +86,7 @@ class doCSV {
 			$query = $pdo->prepare($sql_base);
 			$sql = $sql_base;
 			$chunk_size = 5000;
+			$last_time = $time_start;
 
 			while (($data = fgetcsv($fp, 1000, ",")) !== FALSE)
 			{
@@ -93,9 +96,9 @@ class doCSV {
 					$this->sql_len = 0;
 					$this->total_rows += $chunk_size;
 
-					echo "inserted $chunk_size more\n";
 					$time_end = microtime(true);
-					echo "Current insert time: " . ($time_end - $time_start) . " seconds\n";
+					echo "Inserted: " . $chunk_size . "   Total: ~" . $this->total_rows . "   Time delta: " . substr(($time_end - $last_time), 0, 8) . "   Current insert time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
+					$last_time = $time_end;
 					$pdo->beginTransaction();
 				}
 
@@ -107,7 +110,7 @@ class doCSV {
 			}
 
 			$time_end = microtime(true);
-			echo "Total insert time: " . ($time_end - $time_start) . " seconds\n";
+			echo "\nTotal insert time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
 		}
 		fclose($fp);
 // die;
