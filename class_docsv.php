@@ -1,9 +1,19 @@
 <?php
 ini_set('memory_limit','512M');
 /**
- * Commit timestamp - Just cloned repo and set up a clean laravel install - Charlie Sheather - Thu, 04 Dec 2014 11:31:58
+ * NOTES
+ *   10mb of csv is around 50,000 rows
+ *   so 325mb should be about 1,600,000 rows ?
  *
+ *   This is meant for CLI use, has NOT been tested in any other environment
+ *
+ * TEST RESULTS - Charlie Sheather - Thu, 04 Dec 2014 16:59:35
+ *   Used about 10mb ram during testing
+ *   Total insert time: 142.6087 seconds
+ *   Avg time per 1000 rows: 1.066233 seconds
+ * 
  */
+
 class doCSV {
 	/**
 	 * This is the job that will be launched by the Laravel queue...
@@ -13,10 +23,8 @@ class doCSV {
 	 *
 	 */
 
-	private $sql = array();
-	private $sql_len = 0;
-	private $total_rows = 0;
 	private $table = 'csv_data';
+
 	public function runJob($job, $data)
 	{
 		$downloadUrl = $data['url'];
@@ -25,13 +33,11 @@ class doCSV {
 		try
 		{
 			$file = $this->downloadCSV($downloadUrl);
-				//http://stackoverflow.com/questions/3908477/need-time-efficient-method-of-importing-large-csv-file-via-php-into-multiple-mys?rq=1
-			// https://laracasts.com/forum/?p=649-bulk-insert-update/0
-			$success = $this->insertCSVIntoDatabase($clientID, $file);
+			$inserted = $this->insertCSVIntoDatabase($clientID, $file);
 		}
 		catch (Exception $e)
 		{
-			echo 'Some error occured: [' . $e->getMessage() . ' at ' . $e->getLine() . ']';
+			echo 'Some error occured: [' . $e->getMessage() . ' at line: ' . $e->getLine() . ']';
 		}
 	}
 
@@ -66,15 +72,18 @@ class doCSV {
 	 */
 	private function insertCSVIntoDatabase($clientID, $file)
 	{
-		// no need to keep decompressing during testing
-		// $file = $this->decompressGz($file);
-		$fp = fopen('batch_of_urls.csv', 'r');
+		$file = $this->decompressGz($file);
+		$fp = fopen($file, 'r');
+
 		if ($fp !== false)
 		{
+			// no need for this although we're now just using the pdo so it should matter
+			DB::connection()->disableQueryLog();
+
 			echo "\nStarting...\n\nTruncating table " . $this->table . "...\n\n";
 			DB::table($this->table)->truncate();
 			echo "Truncated.\n\n";
-			//  as a start lets just get this thing going
+			
 			$time_start = microtime(true);
 
 			// much faster to use phps native pdo instead of laravel DB, so we'll grab the underlying pdo here, which for this type of task is mroe than adequate.
@@ -86,54 +95,77 @@ class doCSV {
 			// trying another approach here, "sub-chunking" the pdo parameters
 			$commit_chunk_size  = 2500; // anywhere between 1000 > 10000 is fine, more or less would probably be ok too. I like 2500
 			$query_chunk_size   = 10; // 10 seems to be the magic number here
-			$all_val            = rtrim(str_repeat($value_template, $query_chunk_size), ',');
+			$chunk_row_count    = 0; // keep track of rows per chunk
+			$total_rows         = 0; // keep track of the total rows traversed
+			$all_val            = rtrim(str_repeat($value_template, $query_chunk_size), ','); // this copies the args string $value_template 
 			$query              = $pdo->prepare($sql_base . $all_val);
 			$current_query_size = 0;
 			$insert_rows        = array();
 
+			// we want to time each chunk insert
 			$last_time = $time_start;
 
 			// fgetcsv is RCF compatible, ie, it knows that things in quotes are not special: "hello, world" == array("hello, world") != array("hello", "world") 
 			while (($data = fgetcsv($fp, 1000, ",")) !== FALSE)
 			{
-				if ($this->sql_len++ == $commit_chunk_size)
+				// were going to commit every $commit_chunk_size records
+				if ($chunk_row_count++ == $commit_chunk_size)
 				{
-					$pdo->commit();
-					$this->sql_len = 0;
-					$this->total_rows += $commit_chunk_size;
+					// commit, too obvious?
+					if(!$pdo->commit())
+					{
+						throw new Exception("There was an error importing the CSV file into the database. [Commit FAILED].");
+					}
 
 					$time_end = microtime(true);
-					echo "Committed: " . $commit_chunk_size . "   Total: " . $this->total_rows . "   Chunk time: " . substr(($time_end - $last_time), 0, 8) . "   Total time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
+
+					// reset the
+					$chunk_row_count = 0;
+					// $total_rows += $commit_chunk_size; // this it not the exact committed rows, its really an approximation
+
+					echo "Committed: ~" . $commit_chunk_size . "   Total: " . $total_rows . "   Chunk time: " . substr(($time_end - $last_time), 0, 8) . "   Total time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
+					
+					// reset the chunk time
 					$last_time = $time_end;
+
+					// annd start the next transaction
 					$pdo->beginTransaction();
 				}
 
+				//  execute the "sub-chunks" every $query_chunk_size
 				if ($current_query_size++ == $query_chunk_size)
 				{
-					$query->execute($insert_rows);
+					if (!$query->execute($insert_rows))
+					{
+						throw new Exception("There was an error importing the CSV file into the database. [Query Execution FAILED].");
+					}
 					$current_query_size = 1; // THIS NEEDS TO BE 1!!!, otherwise we get an extra sub chunk of data and the query fails
-					$insert_rows = array();
+					$insert_rows = array(); // reset the rows to insert
 				}
 
+				// add the client id to the start of the array we got from the csv
 				array_unshift($data, $clientID);
+
+				// join the newest csv data to the previous data
 				$insert_rows = array_merge($insert_rows, $data);
 
-				if ($this->total_rows >= 50000) break;
+				$total_rows++;
+				if ($total_rows >= 50000) break;
 
 			}
 
 			$time_end = microtime(true);
 			$total_time = substr(($time_end - $time_start), 0, 8);
+
 			echo "\nTotal insert time: " . substr(($time_end - $time_start), 0, 8) . " seconds\n";
-			echo "\n~Time per 1000 rows: " . substr(($total_time / $this->total_rows * 10000), 0, 8). " seconds\n";
+			echo "\nAvg time per 1000 rows: " . substr(($total_time / $total_rows * 10000), 0, 8). " seconds\n";
+
+			fclose($fp);
 		}
-		fclose($fp);
-// die;
-// 		var_dump($this->parse_csv(
-// '123,"4321","21,4234",234,532
-// asd,ewf,wef,fww,wef
-// wf,wdf,3rf2
-// '));
+		else
+		{
+			throw new Exception("Could not open CSV file.");
+		}
 		// throw new Exception("There was an error importing the CSV file into the database.");
 	}
 
@@ -165,14 +197,24 @@ class doCSV {
 		return $_file;
 	}
 
-	// http://stackoverflow.com/a/3293251
+	/**
+	 * Decompresses gz files.
+	 * 
+	 * Expects that the output file will be text, hence the 'w' flag on fopen, rather than 'wb'.
+	 *
+	 * Adapted from http://stackoverflow.com/a/3293251 - Charlie Sheather - Thu, 04 Dec 2014 16:51:43
+	 *
+	 * @param string $file_name the name of the gz file to decompress
+	 * @param boolean $return_new_fp if set to true the funciton will return the file pointer of the unzipped file
+	 *                               NOTE: the file is opened WRITE ONLY
+	 */
 	private function decompressGz($file_name, $return_new_fp = false)
 	{
 		// Raising this value may increase performance
 		$buffer_size = 4096; // read 4kb at a time
 		$out_file_name = str_replace('.gz', '', $file_name);
 
-		// Open our files (in binary mode)
+		// Open our files (the gz in binary mode, the destination in text)
 		$file = gzopen($file_name, 'rb');
 		$out_file = fopen($out_file_name, 'w');
 
@@ -197,12 +239,16 @@ class doCSV {
 		}
 		else
 		{
-			fseek($out_file, 0);
+			// if we're returning the file pointer should we reset the position?
+			// we're only opening in write mode so maybe not?
+			// fseek($out_file, 0);
 			return $out_file;
 		}
 	}
 
-// http://php.net/str_getcsv#113220
+	// I found that fgetcsv works fine quioted strings containing commas / \n etc, so am using that, but hav not tested all situations myself so leaving the following here:
+	/*
+	// http://php.net/str_getcsv#113220
 	//parse a CSV file into a two-dimensional array
 	//this seems as simple as splitting a string by lines and commas, but this only works if tricks are performed
 	//to ensure that you do NOT split on lines and commas that are inside of double quotes.
@@ -257,5 +303,6 @@ class doCSV {
 		$field = str_replace("\rR", "\r", $field);
 		return $field;
 	}
+	*/
 
 }
