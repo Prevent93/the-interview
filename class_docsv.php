@@ -15,6 +15,7 @@ class doCSV {
 
 	private $sql = array();
 	private $sql_len = 0;
+	private $total_rows = 0;
 	public function runJob($job, $data)
 	{
 		$downloadUrl = $data['url'];
@@ -67,51 +68,46 @@ class doCSV {
 	 */
 	private function insertCSVIntoDatabase($clientID, $file)
 	{
-		$file = $this->decompressGz($file);
-		$fp = fopen($file, 'r');
+		// no need to keep decompressing during testing
+		// $file = $this->decompressGz($file);
+		$fp = fopen('batch_of_urls.csv', 'r');
 		if ($fp !== false)
 		{
+			DB::table('csv_data')->truncate();
 			//  as a start lets just get this thing going
+			$time_start = microtime(true);
+
+			// much faster juut to use php native pdo, which for this type of task is mroe than adequate.
+			$pdo = DB::getPdo();
+			$pdo->beginTransaction();
+			$sql_base = 'INSERT INTO csv_data (client_id, target_url, source_url, anchor_text, source_crawl_date, source_first_found_date, flag_no_follow, flag_image_link, flag_redirect, flag_frame, flag_old_crawl, flag_alt_text, flag_mention, source_citation_flow, source_trust_flow, target_citation_flow, target_trust_flow, source_topical_trust_flow_topic_0, source_topical_trust_flow_value_0, ref_domain_topical_trust_flow_topic_0, ref_domain_topical_trust_flow_value_0) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)';
+			$query = $pdo->prepare($sql_base);
+			$sql = $sql_base;
+			$chunk_size = 5000;
+
 			while (($data = fgetcsv($fp, 1000, ",")) !== FALSE)
 			{
-				// var_dump($data);
-				if ($this->sql_len++ == 3000)
+				if ($this->sql_len++ == $chunk_size)
 				{
-					DB::transaction(function()
-					{
-						DB::table('csv_data')->insert($this->chunk);
-						$this->chunk = array();
-						$this->sql_len = 0;
-					});
-					echo "inserted more\n";
+					$pdo->commit();
+					$this->sql_len = 0;
+					$this->total_rows += $chunk_size;
+
+					echo "inserted $chunk_size more\n";
+					$time_end = microtime(true);
+					echo "Current insert time: " . ($time_end - $time_start) . " seconds\n";
+					$pdo->beginTransaction();
 				}
-				$col = 0;
-				$this->chunk[] = array(
-					'client_id' => $clientID,
-					'target_url' => $data[$col++],
-					'source_url' => $data[$col++],
-					'anchor_text' => $data[$col++],
-					'source_crawl_date' => $data[$col++],
-					'source_first_found_date' => $data[$col++],
-					'flag_no_follow' => $data[$col++],
-					'flag_image_link' => $data[$col++],
-					'flag_redirect' => $data[$col++],
-					'flag_frame' => $data[$col++],
-					'flag_old_crawl' => $data[$col++],
-					'flag_alt_text' => $data[$col++],
-					'flag_mention' => $data[$col++],
-					'source_citation_flow' => $data[$col++],
-					'source_trust_flow' => $data[$col++],
-					'target_citation_flow' => $data[$col++],
-					'target_trust_flow' => $data[$col++],
-					'source_topical_trust_flow_topic_0' => $data[$col++],
-					'source_topical_trust_flow_value_0' => $data[$col++],
-					'ref_domain_topical_trust_flow_topic_0' => $data[$col++],
-					'ref_domain_topical_trust_flow_value_0' => $data[$col++],
-				);
+
+				if ($this->total_rows > 50000) break;
+
+				array_unshift($data, $clientID);
+				$query->execute($data);
+
 			}
-			// var_dump($this->sql[$this->sql_len - 2]);
-			var_dump(count($this->sql));
+
+			$time_end = microtime(true);
+			echo "Total insert time: " . ($time_end - $time_start) . " seconds\n";
 		}
 		fclose($fp);
 // die;

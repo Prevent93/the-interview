@@ -11,7 +11,7 @@ require $path . '/vendor/autoload.php';
 // Bootstrap Laravel
 $app = require_once $path . '/bootstrap/start.php';
 
-
+DB::connection()->disableQueryLog();
 /**
 * 
 */
