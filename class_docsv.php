@@ -8,6 +8,9 @@ ini_set('memory_limit','512M');
  *
  *   This is meant for CLI use, has NOT been tested in any other environment
  *
+ *   We're including laravel and using it to connect to the database 
+ *   so the database connection must be configured in app/config/database.php
+ *
  * NOTES ON TABLE STRUCTURE 
  *   - Have chosen to use MyISAM as it dramatically speeds up the the insertions
  *   - target_url, source_url, anchor_text could be change to varchar(~500) but it would need more
